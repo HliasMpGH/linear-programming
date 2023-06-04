@@ -60,9 +60,10 @@ model.destinations = range(0, nDestinations) # set of Destinations (T.K.)
 model.d = Var(model.locations, within = Binary) # dj, binary variable so that d[j] is 1 if kitchen j opens
 model.m = Var(model.destinations, model.locations, within = NonNegativeIntegers) # mij, where m[i,j] is the quantity that is being transfered to i from j 
 
-#                                                        variable cost                                                     fixed cost
-model.obj = Objective(expr = sum(t_cost[i][j] * model.m[i,j] for i in model.destinations for j in model.locations) + sum(model.d[j] * f_cost[j] for j in model.locations), sense = minimize)
-
+#                                                        variable cost                                                     
+model.obj = Objective(expr = sum(t_cost[i][j] * model.m[i,j] for i in model.destinations for j in model.locations)  
+                    +  sum(model.d[j] * f_cost[j] for j in model.locations), sense = minimize)
+#                                       fixed cost
 
 model.x = Var(model.locations, within = NonNegativeIntegers) # xj, where x[j] is the quantity that kitchen j produces
 model.z = Var(model.destinations, model.locations, within = Binary) # yij, binary variable so that y[i,j] is 1 if TK i is being served from kitchen j
@@ -78,11 +79,11 @@ model.constraints = ConstraintList()
 # define x[k] as the total quantity kitchen k produces
 for j in model.locations :
     model.constraints.add(model.x[j] == sum(model.m[i,j] for i in model.destinations))
-
+'''
 # each k kitchen can only produce up to av_space[k] of goods
 for j in model.locations :
     model.constraints.add(model.x[j] <= av_space[j] * model.d[j])
-
+'''
 # each TK has to be served by one and only kitchen
 for i in model.destinations:
     model.constraints.add(sum(model.z[i,j] for j in model.locations) == 1)
@@ -106,13 +107,44 @@ for i in model.destinations:
 # kitchen 10 & 2 (9 & 1 in the model) have to open if kitchen 1 does
 model.constraints.add(model.d[0] <= model.d[1])
 model.constraints.add(model.d[0] <= model.d[9])
-# note : if kitchen 1 does *not* open, the other kitchens are not limited about if they work or not 
+# note: if kitchen 1 does *not* open, the other kitchens are not limited about if they work or not 
 
 # if kitchen 6 opens, kitchen 7 has to remain closed
 model.constraints.add(model.d[5] + model.d[6] <= 1)
 
 # kitchens 4, 7, 8 & 9 cant open all together
 model.constraints.add(model.d[3] + model.d[6] +model.d[7] + model.d[8] <= 3)
+
+''' 
+    ------------------------------------------------
+    QC: the additions & changes needed in order 
+    to implement the model described in c)
+    ------------------------------------------------
+'''
+
+model.y = Var(model.locations, within = Binary) # yj, binary variable so that y[j] is 1 if kitchen j delivered half of its stock
+model.t = Var(model.destinations, model.locations, within = NonNegativeIntegers) # tij, where t[i,j] is the quantity that TK i receives from site j
+
+model.obj += sum(model.t[i,j] * t_cost[i][j] * 0.2 for j in model.locations for i in model.destinations)
+
+model.r = Var(model.locations, within = NonNegativeIntegers) # rj, where r[j] is the quantity that is being reiceved from site j
+
+# define r[k] as the total quantity that kitchen k gives on site
+for j in model.locations :
+    model.constraints.add(model.r[j] == sum(model.t[i,j] for i in model.destinations))
+
+# each k kitchen can only give on site up to av_space[k] / 2 of goods
+for j in model.locations :
+    model.constraints.add(model.r[j] <= 0.5 * av_space[j] * model.y[j])
+
+# each k kitchen can only transport up to av_space[k] / 2 of goods
+for j in model.locations :
+    model.constraints.add(model.x[j] <= 0.5 * av_space[j] * model.d[j])
+
+# kitchen j cant give TK i goods on site if it hasnt delivered its half batch first  
+for j in model.locations :
+    for i in model.destinations :
+        model.constraints.add(model.t[i,j] <= 0.5 * av_space[j] * model.y[j])
 
 opt = SolverFactory("glpk")
 
