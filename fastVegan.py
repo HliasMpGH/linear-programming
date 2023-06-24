@@ -51,11 +51,6 @@ nDestinations = 30
 
 model.locations = range(0, nLocations) # set of Locations (kitchens)
 model.destinations = range(0, nDestinations) # set of Destinations (T.K.)
-    
-#model.nI = Param(initialize = nDestinations) # set of Destinations (T.K.)
-#model.nJ = Param(initialize = nLocations) # set of Locations (kitchens)
-#model.i = RangeSet(model.nI) # set of Destinations (T.K.)
-#model.j = RangeSet(model.nJ) # set of Locations (kitchens)
 
 model.d = Var(model.locations, within = Binary) # dj, binary variable so that d[j] is 1 if kitchen j opens
 model.m = Var(model.destinations, model.locations, within = NonNegativeIntegers) # mij, where m[i,j] is the quantity that is being transfered to i from j 
@@ -65,8 +60,8 @@ model.obj = Objective(expr = sum(t_cost[i][j] * model.m[i,j] for i in model.dest
                     +  sum(model.d[j] * f_cost[j] for j in model.locations), sense = minimize)
 #                                       fixed cost
 
-model.x = Var(model.locations, within = NonNegativeIntegers) # xj, where x[j] is the quantity that kitchen j produces
-model.z = Var(model.destinations, model.locations, within = Binary) # yij, binary variable so that y[i,j] is 1 if TK i is being served from kitchen j
+model.x = Var(model.locations, within = NonNegativeIntegers) # xj, where x[j] is the quantity that kitchen j moves
+model.z = Var(model.destinations, model.locations, within = Binary) # zij, binary variable so that z[i,j] is 1 if TK i is being served from kitchen j
 
 ''' 
     ------------------------------------------------
@@ -76,26 +71,22 @@ model.z = Var(model.destinations, model.locations, within = Binary) # yij, binar
 
 model.constraints = ConstraintList()
 
-# define x[k] as the total quantity kitchen k produces
+# define x[k] as the total quantity kitchen k moves
 for j in model.locations :
     model.constraints.add(model.x[j] == sum(model.m[i,j] for i in model.destinations))
 '''
-# each k kitchen can only produce up to av_space[k] of goods
+# each k kitchen can only transport up to av_space[k] of goods
 for j in model.locations :
     model.constraints.add(model.x[j] <= av_space[j] * model.d[j])
 '''
 # each TK has to be served by one and only kitchen
-for i in model.destinations:
+for i in model.destinations :
     model.constraints.add(sum(model.z[i,j] for j in model.locations) == 1)
-
+'''
 # each k TK has to receive exaclty demand[k] worth of goods 
 for i in model.destinations :
     for j in model.locations :
         model.constraints.add(model.m[i,j] == demand[i] * model.z[i,j])
-'''
-# each k TK has to receive exaclty demand[k] worth of goods 
-for i in model.destinations:
-    model.constraints.add(sum(model.m[i,j] for j in model.locations) == demand[i])
 '''
 ''' 
     ------------------------------------------------
@@ -115,7 +106,7 @@ model.constraints.add(model.d[5] + model.d[6] <= 1)
 # kitchens 4, 7, 8 & 9 cant open all together
 model.constraints.add(model.d[3] + model.d[6] +model.d[7] + model.d[8] <= 3)
 
-''' 
+'''
     ------------------------------------------------
     QC: the additions & changes needed in order 
     to implement the model described in c)
@@ -123,28 +114,33 @@ model.constraints.add(model.d[3] + model.d[6] +model.d[7] + model.d[8] <= 3)
 '''
 
 model.y = Var(model.locations, within = Binary) # yj, binary variable so that y[j] is 1 if kitchen j delivered half of its stock
-model.t = Var(model.destinations, model.locations, within = NonNegativeIntegers) # tij, where t[i,j] is the quantity that TK i receives from site j
+model.t = Var(model.destinations, model.locations, within = NonNegativeIntegers) # tij, the quantity that is being served on site j to TK i
 
-model.obj += sum(model.t[i,j] * t_cost[i][j] * 0.2 for j in model.locations for i in model.destinations)
+model.obj.expr += sum(model.t[i,j] * t_cost[i][j] * 0.2 for j in model.locations for i in model.destinations)
 
-model.r = Var(model.locations, within = NonNegativeIntegers) # rj, where r[j] is the quantity that is being reiceved from site j
+model.r = Var(model.locations, within = NonNegativeIntegers) # rj, where r[j] is the quantity that is being received from site j
 
 # define r[k] as the total quantity that kitchen k gives on site
 for j in model.locations :
     model.constraints.add(model.r[j] == sum(model.t[i,j] for i in model.destinations))
 
-# each k kitchen can only give on site up to av_space[k] / 2 of goods
-for j in model.locations :
-    model.constraints.add(model.r[j] <= 0.5 * av_space[j] * model.y[j])
-
 # each k kitchen can only transport up to av_space[k] / 2 of goods
 for j in model.locations :
     model.constraints.add(model.x[j] <= 0.5 * av_space[j] * model.d[j])
 
-# kitchen j cant give TK i goods on site if it hasnt delivered its half batch first  
+# each k kitchen can only give on site up to av_space[k] / 2 of goods
 for j in model.locations :
-    for i in model.destinations :
-        model.constraints.add(model.t[i,j] <= 0.5 * av_space[j] * model.y[j])
+    model.constraints.add(model.r[j] <= 0.5 * av_space[j] * model.y[j])
+
+# make sure dj & yj are dependent to eachother (yj can be 1 if dj is 1)
+for j in model.locations :
+    model.constraints.add(model.d[j] >= model.y[j])
+
+# each k TK has to receive exaclty demand[k] worth of goods, by transportation or from site
+for i in model.destinations:
+    for j in model.locations:
+        model.constraints.add(model.m[i,j] + model.t[i,j] == demand[i] * model.z[i,j])
+
 
 opt = SolverFactory("glpk")
 
@@ -165,12 +161,14 @@ for j in model.locations :
 print("\n")
 
 for i in model.destinations :
-    print("TK #",i + 1,"is going to eat from Location:", end = " ")
+    print("-----------")
+    print("destination",i+1,"is being served from location", end =" ")
     for j in model.locations :
         if value(model.z[i,j]) == 1 :
             print(j+1)
-            break
-    print("\r")
+            print(value(model.m[i,j]), "portions by delivery")
+            print(value(model.t[i,j]), "portions on site")
+
 
 print("------------------------------------------------")
 print("Total cost of Franchise:",value(model.obj))
